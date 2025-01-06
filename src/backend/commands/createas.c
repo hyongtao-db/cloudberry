@@ -1552,6 +1552,24 @@ check_aggregate_supports_ivm(Oid aggfnoid)
 		case F_AVG_FLOAT8:
 		case F_AVG_INTERVAL:
 
+		/* min */
+		case F_MIN_INT8:
+		case F_MIN_INT4:
+		case F_MIN_INT2:
+		case F_MIN_NUMERIC:
+		case F_MIN_FLOAT4:
+		case F_MIN_FLOAT8:
+		case F_MIN_INTERVAL:
+
+		/* max */
+		case F_MAX_INT8:
+		case F_MAX_INT4:
+		case F_MAX_INT2:
+		case F_MAX_NUMERIC:
+		case F_MAX_FLOAT4:
+		case F_MAX_FLOAT8:
+		case F_MAX_INTERVAL:
+
 			return true;
 
 		default:

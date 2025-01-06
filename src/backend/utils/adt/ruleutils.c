@@ -501,6 +501,10 @@ static char *generate_qualified_type_name(Oid typid);
 static text *string_to_text(char *str);
 static char *flatten_reloptions(Oid relid);
 static void get_reloptions(StringInfo buf, Datum reloptions);
+static Query *get_immv_query(Relation matviewRel);
+static Oid PgIvmImmvRelationId(void);
+static Oid PgIvmImmvPrimaryKeyIndexId(void);
+
 
 #define only_marker(rte)  ((rte)->inh ? "" : "ONLY ")
 
@@ -12550,4 +12554,101 @@ get_range_partbound_string(List *bound_datums)
 	appendStringInfoChar(buf, ')');
 
 	return buf->data;
+}
+
+#define Anum_pg_ivm_immv_immvrelid 1
+#define Anum_pg_ivm_immv_viewdef 2
+
+/*
+ * Get relid of pg_ivm_immv
+ */
+Oid
+PgIvmImmvRelationId(void)
+{
+	return RangeVarGetRelid(
+		makeRangeVar("pg_catalog", "pg_ivm_immv", -1),
+		AccessShareLock, true);
+}
+
+/*
+ * Get relid of pg_ivm_immv's primary key
+ */
+Oid
+PgIvmImmvPrimaryKeyIndexId(void)
+{
+	return RangeVarGetRelid(
+		makeRangeVar("pg_catalog", "pg_ivm_immv_pkey", -1),
+		AccessShareLock, true);
+}
+
+/*
+ * get_immv_query - get the Query of IMMV.
+ */
+Query *
+get_immv_query(Relation matviewRel)
+{
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple tup;
+	bool isnull;
+	Datum datum;
+	Query *query;
+
+	ScanKeyInit(&key,
+			    Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(RelationGetRelid(matviewRel)));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+		return NULL;
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_viewdef, tupdesc, &isnull);
+	Assert(!isnull);
+	query = (Query *) stringToNode(TextDatumGetCString(datum));
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+
+	return query;
+}
+
+/* ----------
+ * pg_ivm_get_viewdef
+ *
+ * Public entry point to deparse a view definition query parsetree.
+ * The pretty flags are determined by GET_PRETTY_FLAGS(pretty).
+ *
+ * The result is a palloc'd C string.
+ * ----------
+ */
+char *
+pg_ivm_get_viewdef(Relation immvrel)
+{
+	Query *query = get_immv_query(immvrel);
+	TupleDesc resultDesc = RelationGetDescr(immvrel);
+
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+
+	/*
+	 * For PG14 or earlier, we use get_query_def which is copied
+	 * from the core because any public function for this purpose
+	 * is not available.
+	 */
+	get_query_def(query, &buf, NIL, resultDesc, true,
+				  PRETTYFLAG_PAREN, WRAP_COLUMN_DEFAULT, 0);
+
+	return buf.data;
+
 }

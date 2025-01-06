@@ -43,4 +43,6 @@ extern char *get_range_partbound_string(List *bound_datums);
 
 extern char *pg_get_statisticsobjdef_string(Oid statextid);
 
+extern char *pg_ivm_get_viewdef(Relation immvrel);
+
 #endif							/* RULEUTILS_H */
