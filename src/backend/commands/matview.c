@@ -1217,7 +1217,7 @@ refresh_by_match_merge(Oid matviewOid, Oid tempOid, Oid relowner,
 
 	appendStringInfo(&querybuf,
 					 "CREATE TEMP TABLE %s AS "
-					 "SELECT mv.ctid AS tid, mv.gp_segment_id as sid, newdata.*::%s AS newdata "
+					 "SELECT mv.ctid AS tid, mv.gp_segment_id as gid, newdata.*::%s AS newdata "
 					 "FROM %s mv FULL JOIN %s newdata ON (",
 					 diffname, tempname, matviewname, tempname);
 
@@ -3048,6 +3048,13 @@ get_null_condition_string(IvmOp op, const char *arg1, const char *arg2,
  * list to identify a tuple in the view. If the view has aggregates, this
  * requires strings representing resnames of aggregates and SET clause for
  * updating aggregate values.
+ *
+ * If the view has min or max aggregate, this requires a list of resnames of
+ * min/max aggregates and a list of boolean which represents which entries in
+ * minmax_list is min. These are necessary to check if we need to recalculate
+ * min or max aggregate values. In this case, this query returns TID and keys
+ * of tuples which need to be recalculated.  This result and the number of rows
+ * are stored in tuptables and num_recalc repectedly.
  */
 static void
 apply_old_delta_with_count(const char *matviewname, Oid matviewRelid, const char *deltaname_old,
@@ -3119,7 +3126,7 @@ apply_old_delta_with_count(const char *matviewname, Oid matviewRelid, const char
 	appendStringInfo(&tselect,
 					"CREATE TEMP TABLE %s AS SELECT diff.%s, "			/* count column */
 								"(diff.%s OPERATOR(pg_catalog.=) mv.%s AND %s) AS for_dlt, "
-								"mv.ctid AS tid, mv.gp_segment_id AS gid"
+								"mv.ctid AS tid, mv.gp_segment_id as gid"
 								"%s "				/* aggregate columns */
 						"FROM %s AS mv, %s AS diff "
 						"WHERE %s DISTRIBUTED RANDOMLY",	/* tuple matching condition */
@@ -3214,7 +3221,7 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
 	appendStringInfo(&querybuf,
 	"DELETE FROM %s WHERE (ctid, gp_segment_id) IN ("
 		"SELECT tid, sid FROM (SELECT pg_catalog.row_number() over (partition by %s) AS \"__ivm_row_number__\","
-								  "mv.ctid AS tid, mv.gp_segment_id as sid,"
+								  "mv.ctid AS tid, mv.gp_segment_id as gid,"
 								  "diff.\"__ivm_count__\""
 						 "FROM %s AS mv, %s AS diff "
 						 "WHERE %s) v "
@@ -3406,7 +3413,7 @@ get_returning_string(List *minmax_list, List *is_min_list, List *keys)
 
 	initStringInfo(&returning);
 
-	appendStringInfo(&returning, "RETURNING mv.ctid AS tid, (%s) AS recalc", recalc_cond);
+	appendStringInfo(&returning, "RETURNING mv.ctid AS tid, mv.gp_segment_id as gid, (%s) AS recalc", recalc_cond);
 	foreach (lc, keys)
 	{
 		Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc);
@@ -3414,6 +3421,7 @@ get_returning_string(List *minmax_list, List *is_min_list, List *keys)
 		appendStringInfo(&returning, ", %s", quote_qualified_identifier("mv", resname));
 	}
 
+	elogif(Debug_print_ivm, INFO, "IVM get_returning_string returning: %s", returning.data);
 	return returning.data;
 }
 
@@ -3449,6 +3457,7 @@ get_minmax_recalc_condition_string(List *minmax_list, List *is_min_list)
 			appendStringInfo(&recalc_cond, " OR ");
 	}
 
+	elogif(Debug_print_ivm, INFO, "IVM get_minmax_recalc_condition_string recalc_cond: %s", recalc_cond.data);
 	return recalc_cond.data;
 }
 
@@ -3476,6 +3485,7 @@ get_select_for_recalc_string(List *keys)
 
 	appendStringInfo(&qry, " FROM updt WHERE recalc");
 
+	elogif(Debug_print_ivm, INFO, "IVM get_select_for_recalc_string qry: %s", qry.data);
 	return qry.data;
 }
 
